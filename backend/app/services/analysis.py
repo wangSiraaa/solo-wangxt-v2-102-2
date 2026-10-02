@@ -22,6 +22,7 @@ from typing import Literal, Optional
 
 import numpy as np
 
+from .allocation import Allocation, compute_free_windows, describe_fit, find_window
 from .masks import get_mask, spectrum_curve
 from .units import dbm_to_watt, total_power_watt, watt_to_dbm
 
@@ -92,22 +93,39 @@ def leakage_power_dbm(tx: Carrier, victim: Carrier,
     return watt_to_dbm(p_w)
 
 
-def _finding(ftype: str, severity: str, a: Carrier, b: Carrier,
+def _finding(ftype: str, severity: str, a: Carrier, b: Optional[Carrier],
              message: str, **metrics) -> dict:
     out = {
         "type": ftype,
         "severity": severity,
         "carrier_a": a.name,
-        "carrier_b": b.name,
+        "carrier_b": b.name if b is not None else None,
         "message": message,
     }
     out.update(metrics)
     return out
 
 
-def analyze(carriers: list[Carrier], rules: AnalysisRules) -> dict:
-    """对整组载波做冲突检查与功率汇总。"""
+def analyze(carriers: list[Carrier], rules: AnalysisRules,
+            allocation: Optional[Allocation] = None) -> dict:
+    """对整组载波做冲突检查与功率汇总。
+
+    给出 allocation 时额外检查每条载波是否完整落在某一可用空闲窗内
+    （不跨段间空洞、不跨排除窗），越界报 out_of_band。
+    """
     findings: list[dict] = []
+
+    # ---- 频谱分配方案：占用带宽必须完整落入某一空闲窗 ----
+    if allocation is not None:
+        windows = compute_free_windows(allocation)
+        for c in carriers:
+            if find_window(windows, c.low, c.high) is None:
+                why = describe_fit(c.low, c.high, allocation) or "未完整落入任何空闲窗"
+                findings.append(_finding(
+                    "out_of_band", "error", c, None,
+                    f"{c.name} 频带 [{c.low:.3f}, {c.high:.3f}] MHz 越出可用空闲窗：{why}",
+                    low_mhz=round(c.low, 4), high_mhz=round(c.high, 4),
+                    fit_reason=why))
 
     for a, b in itertools.combinations(carriers, 2):
         # 边缘净距：频带不相交时 >0（净空），相切时 0，重叠时 <0

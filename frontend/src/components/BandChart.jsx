@@ -19,20 +19,51 @@ function severityByCarrier(findings) {
   for (const f of findings || []) {
     const r = rank[f.severity] || 0
     for (const n of [f.carrier_a, f.carrier_b]) {
-      if (!m[n] || r > rank[m[n]]) m[n] = f.severity
+      if (n && (!m[n] || r > rank[m[n]])) m[n] = f.severity
     }
   }
   return m
 }
 
-export default function BandChart({ bands, findings, selectedPair, plan, onPick }) {
+export default function BandChart({ bands, findings, selectedPair, plan, allocation, onPick }) {
   const sev = useMemo(() => severityByCarrier(findings), [findings])
   const selected = selectedPair || []
 
   const shapes = []
   const annotations = []
 
-  // 规划方案：绿色描边框（不填充，避免盖住原始条带）+ 虚线中心
+  // 频谱分配方案：可用段底色 + 边界线；排除窗红色区
+  for (const [i, s] of (allocation?.segments || []).entries()) {
+    shapes.push({
+      type: 'rect', x0: s.low_mhz, x1: s.high_mhz, y0: 0, y1: 1, yref: 'paper',
+      fillcolor: 'rgba(77,163,255,0.05)', line: { width: 0 }, layer: 'below',
+    })
+    for (const x of [s.low_mhz, s.high_mhz]) {
+      shapes.push({
+        type: 'line', x0: x, x1: x, y0: 0, y1: 1, yref: 'paper',
+        line: { color: 'rgba(77,163,255,0.55)', width: 1.2, dash: 'dash' }, layer: 'below',
+      })
+    }
+    annotations.push({
+      x: (s.low_mhz + s.high_mhz) / 2, y: 1.02, yref: 'paper',
+      text: s.label || `S${i + 1}`, showarrow: false,
+      font: { size: 10, color: '#4da3ff' }, yanchor: 'bottom',
+    })
+  }
+  for (const e of allocation?.exclusions || []) {
+    shapes.push({
+      type: 'rect', x0: e.low_mhz, x1: e.high_mhz, y0: 0, y1: 1, yref: 'paper',
+      fillcolor: 'rgba(255,93,93,0.14)',
+      line: { color: 'rgba(255,93,93,0.7)', width: 1, dash: 'dot' }, layer: 'below',
+    })
+    annotations.push({
+      x: (e.low_mhz + e.high_mhz) / 2, y: 0.5, yref: 'paper',
+      text: `排除${e.reason ? `<br>${e.reason}` : ''}`, showarrow: false,
+      font: { size: 9, color: '#ff5d5d' }, yanchor: 'middle',
+    })
+  }
+
+  // 规划方案：绿色描边框（不填充，避免盖住原始条带）+ 虚线中心 + 归属段标签
   for (const a of plan?.assignments || []) {
     const y = Y_OF[a.polarization]
     shapes.push({
@@ -45,6 +76,13 @@ export default function BandChart({ bands, findings, selectedPair, plan, onPick 
       y0: y - BAR_H / 2, y1: y + BAR_H / 2,
       line: { color: '#3ecf8e', width: 1.5, dash: 'dot' },
     })
+    if (a.segment_label) {
+      annotations.push({
+        x: a.high_mhz, y: y + BAR_H / 2 + 0.16,
+        text: `→${a.segment_label}`, showarrow: false,
+        font: { size: 9, color: '#3ecf8e' }, xanchor: 'left',
+      })
+    }
   }
 
   for (const b of bands || []) {
@@ -72,12 +110,12 @@ export default function BandChart({ bands, findings, selectedPair, plan, onPick 
   }
 
   const layout = {
-    height: 250,
-    margin: { l: 52, r: 16, t: 28, b: 36 },
+    height: 260,
+    margin: { l: 52, r: 16, t: 30, b: 36 },
     paper_bgcolor: 'rgba(0,0,0,0)',
     plot_bgcolor: 'rgba(0,0,0,0)',
     font: { color: '#b8c4cf', size: 11 },
-    title: { text: '频段占用（彩色=录入频带及冲突；绿色描边=OR-Tools 规划位置）', font: { size: 12 } },
+    title: { text: '频段占用（蓝虚线=可用段边界，红区=排除窗；彩色=录入频带及冲突；绿框=规划归属）', font: { size: 12 } },
     xaxis: { title: '频率 (MHz)', zeroline: false, gridcolor: 'rgba(255,255,255,0.06)' },
     yaxis: {
       tickvals: [1, 2, 3, 4], ticktext: ['RHCP', 'LHCP', 'V', 'H'],
@@ -106,7 +144,8 @@ export default function BandChart({ bands, findings, selectedPair, plan, onPick 
       data={[pickLayer]}
       layout={layout}
       revision={JSON.stringify({ shapes: shapes.length, bands: (bands || []).length,
-                                 plan: (plan?.assignments || []).length, sel: selected.join(',') })}
+                                 plan: (plan?.assignments || []).length, sel: selected.join(','),
+                                 alloc: allocation })}
       onClick={(e) => {
         const i = e?.points?.[0]?.pointIndex
         if (onPick && i != null && bands[i]) onPick(bands[i].name)

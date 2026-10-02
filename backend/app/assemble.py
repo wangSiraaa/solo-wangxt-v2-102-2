@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .schemas import AnalyzeRequest, CarrierIn, RulesIn
+from .schemas import AllocationIn, AnalyzeRequest, CarrierIn, RulesIn
+from .services.allocation import Allocation, Exclusion, Segment
 from .services.analysis import AnalysisRules, Carrier
 from .services.masks import MASKS, get_mask, psd_on_grid
 from .services.units import dbm_to_watt
@@ -22,6 +23,14 @@ def to_rules(r: RulesIn) -> AnalysisRules:
         guard_required_mhz=r.guard_required_mhz,
         leakage_limit_dbm=r.leakage_limit_dbm,
         reuse_policy=dict(r.reuse_policy),
+    )
+
+
+def to_allocation(a: AllocationIn) -> Allocation:
+    return Allocation(
+        segments=tuple(Segment(s.low_mhz, s.high_mhz, s.label) for s in a.segments),
+        exclusions=tuple(Exclusion(e.low_mhz, e.high_mhz, e.reason)
+                         for e in a.exclusions),
     )
 
 

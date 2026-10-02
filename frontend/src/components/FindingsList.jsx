@@ -3,6 +3,7 @@ const TYPE_LABEL = {
   guard_shortfall: '保护带不足',
   mask_tail: '掩模尾部越界',
   reuse_unknown: '复用待评估',
+  out_of_band: '越出可用频段',
 }
 const SEV_LABEL = { error: '冲突', warning: '警告', pending: '待评估' }
 
@@ -13,7 +14,8 @@ export default function FindingsList({ findings, selectedPair, onSelect }) {
   return (
     <ul className="findings">
       {findings.map((f, i) => {
-        const key = [f.carrier_a, f.carrier_b].sort().join('|')
+        const pair = [f.carrier_a, f.carrier_b].filter(Boolean)
+        const key = [...pair].sort().join('|')
         const selKey = selectedPair ? [...selectedPair].sort().join('|') : null
         const meta = []
         if (f.type === 'mask_tail') {
@@ -21,6 +23,8 @@ export default function FindingsList({ findings, selectedPair, onSelect }) {
           meta.push(`方向 ${f.direction}`)
         } else if (f.type === 'guard_shortfall') {
           meta.push(`净距 ${f.gap_mhz} MHz < 要求 ${f.required_mhz} MHz（差 ${f.deficit_mhz} MHz）`)
+        } else if (f.type === 'out_of_band') {
+          meta.push(`频带 [${f.low_mhz}, ${f.high_mhz}] MHz：${f.fit_reason}`)
         } else if (f.overlap_mhz != null) {
           meta.push(`重叠 ${f.overlap_mhz} MHz`)
         }
@@ -29,9 +33,9 @@ export default function FindingsList({ findings, selectedPair, onSelect }) {
         }
         return (
           <li key={i} className={`${f.severity} ${selKey === key ? 'flash' : ''}`}
-              onClick={() => onSelect([f.carrier_a, f.carrier_b])}>
+              onClick={() => onSelect(pair)}>
             <span className="tag">{SEV_LABEL[f.severity]}</span>
-            <span className="pair">{f.carrier_a} ⇄ {f.carrier_b}</span>
+            <span className="pair">{pair.join(' ⇄ ')}</span>
             <span className="muted"> · {TYPE_LABEL[f.type] || f.type}</span>
             <div>{f.message}</div>
             {meta.map((m, k) => <span key={k} className="meta">{m}</span>)}

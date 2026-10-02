@@ -147,3 +147,23 @@ label.field-label { color: var(--muted); font-size: 12px; }
 .err-msg { color: var(--error); font-size: 12px; margin-top: 6px; }
 .muted { color: var(--muted); }
 .plot-note { font-size: 11px; color: var(--muted); margin: 2px 0 8px; }
+
+/* 频谱分配方案 */
+.alloc-table td input { min-width: 0; }
+.version-pill {
+  font-size: 11px; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 1px 9px;
+}
+.seg-pill {
+  font-size: 10px; color: var(--ok); border: 1px solid rgba(62,207,142,.6);
+  border-radius: 8px; padding: 0 6px; white-space: nowrap;
+}
+.findings li.ok { border-left-color: var(--ok); }
+.button-like {
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 5px 12px; font-size: 12px; cursor: pointer;
+  display: inline-block;
+}
+.button-like:hover { border-color: var(--accent); }
+.button-like.disabled { opacity: .45; cursor: not-allowed; }
