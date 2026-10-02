@@ -7,6 +7,8 @@ import PowerSummary from './components/PowerSummary.jsx'
 import BandChart from './components/BandChart.jsx'
 import SpectrumChart from './components/SpectrumChart.jsx'
 import MaskPreview from './components/MaskPreview.jsx'
+import AllocationPanel from './components/AllocationPanel.jsx'
+import PlanHistory from './components/PlanHistory.jsx'
 
 const EMPTY_RULES = { guard_required_mhz: 1.0, leakage_limit_dbm: -45.0, reuse_policy: {} }
 
@@ -15,11 +17,17 @@ const newCarrier = (i) => ({
   power_dbm: 20, polarization: 'H', mask_name: 'strict',
 })
 
+const defaultAllocation = (low = 80, high = 220) => ({
+  name: '默认分配方案', version: 1,
+  segments: [{ low_mhz: low, high_mhz: high }], exclusions: [],
+})
+
 export default function App() {
   const [masks, setMasks] = useState([])
   const [carriers, setCarriers] = useState([newCarrier(0)])
   const [rules, setRules] = useState(EMPTY_RULES)
-  const [band, setBand] = useState({ low: 80, high: 220 })
+  const [allocation, setAllocation] = useState(() => defaultAllocation())
+  const [legacyMigrated, setLegacyMigrated] = useState(false)
   const [scenarios, setScenarios] = useState([])
   const [scenarioId, setScenarioId] = useState(null)
   const [scenarioName, setScenarioName] = useState('未命名场景')
@@ -27,6 +35,7 @@ export default function App() {
   const [plan, setPlan] = useState(null)
   const [planMode, setPlanMode] = useState('guard_only')
   const [planView, setPlanView] = useState(false)
+  const [historyKey, setHistoryKey] = useState(0)
   const [tab, setTab] = useState('spectrum')
   const [selectedPair, setSelectedPair] = useState(null)
   const [busy, setBusy] = useState('')
@@ -46,6 +55,7 @@ export default function App() {
       const res = await api.analyze({
         carriers,
         rules: { ...rules, reuse_policy: normalizePolicy(rules.reuse_policy) },
+        allocation,
         plot_grid_mhz: 0.05,
       })
       setAnalysis(res)
@@ -55,7 +65,7 @@ export default function App() {
     } finally {
       setBusy('')
     }
-  }, [carriers, rules])
+  }, [carriers, rules, allocation])
 
   const runPlan = useCallback(async () => {
     setBusy('plan'); setError('')
@@ -63,7 +73,7 @@ export default function App() {
       const res = await api.plan({
         carriers,
         rules: { ...rules, reuse_policy: normalizePolicy(rules.reuse_policy) },
-        band_low_mhz: band.low, band_high_mhz: band.high, mode: planMode,
+        allocation, mode: planMode,
       })
       setPlan(res)
       setPlanView(false) // 默认显示原始（冲突）谱；可切换到规划后
@@ -72,10 +82,10 @@ export default function App() {
     } finally {
       setBusy('')
     }
-  }, [carriers, rules, band, planMode])
+  }, [carriers, rules, allocation, planMode])
 
   const loadScenario = async (id) => {
-    if (!id) { setScenarioId(null); return }
+    if (!id) { setScenarioId(null); setLegacyMigrated(false); return }
     setBusy('load'); setError('')
     try {
       const sc = await api.getScenario(id)
@@ -83,24 +93,41 @@ export default function App() {
       setCarriers(sc.carriers.map(({ id, ...c }) => c))
       setRules({ guard_required_mhz: sc.guard_required_mhz,
                  leakage_limit_dbm: sc.leakage_limit_dbm, reuse_policy: sc.reuse_policy || {} })
-      setBand({ low: sc.band_low_mhz, high: sc.band_high_mhz })
+      const al = sc.allocation
+      setAllocation({
+        name: al.name, version: al.version,
+        segments: al.segments.map((s) => ({ low_mhz: s.low_mhz, high_mhz: s.high_mhz })),
+        exclusions: (al.exclusions || []).map((e) => ({
+          low_mhz: e.low_mhz, high_mhz: e.high_mhz, reason: e.reason || '' })),
+      })
+      // 旧格式场景（无 allocation 数据）由后端即时迁移为等价单段，前端给出提示
+      setLegacyMigrated(!!sc.allocation_migrated)
       setAnalysis(null); setPlan(null); setSelectedPair(null)
+      setHistoryKey((k) => k + 1)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
   const saveScenario = async () => {
     setBusy('save'); setError('')
     const payload = {
-      name: scenarioName, description: '', band_low_mhz: band.low, band_high_mhz: band.high,
+      name: scenarioName, description: '',
       guard_required_mhz: rules.guard_required_mhz, leakage_limit_dbm: rules.leakage_limit_dbm,
-      reuse_policy: normalizePolicy(rules.reuse_policy), carriers,
+      reuse_policy: normalizePolicy(rules.reuse_policy),
+      // 旧字段保留为总体外边界（兼容旧客户端）；多段信息以 allocation 为准
+      band_low_mhz: Math.min(...allocation.segments.map((s) => s.low_mhz)),
+      band_high_mhz: Math.max(...allocation.segments.map((s) => s.high_mhz)),
+      allocation,
+      carriers,
     }
     try {
       const saved = scenarioId
         ? await api.updateScenario(scenarioId, payload)
         : await api.createScenario(payload)
       setScenarioId(saved.id)
+      setAllocation({ ...allocation, version: saved.allocation.version })
+      setLegacyMigrated(false)
       await refreshScenarios()
+      setHistoryKey((k) => k + 1)
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
@@ -114,8 +141,35 @@ export default function App() {
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
 
+  const exportScenario = async () => {
+    if (!scenarioId) return
+    setError('')
+    try {
+      const doc = await api.exportScenario(scenarioId)
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `scenario-${scenarioId}-v${doc.scenario.allocation.version}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) { setError(e.message) }
+  }
+
+  const importScenario = async (file) => {
+    setBusy('import'); setError('')
+    try {
+      const doc = JSON.parse(await file.text())
+      const r = await api.importScenario(doc)
+      await refreshScenarios()
+      const sid = r.imported.id
+      await loadScenario(sid)
+      setHistoryKey((k) => k + 1)
+    } catch (e) { setError(e.message) } finally { setBusy('') }
+  }
+
   const status = analysis?.status
-  // 频段图始终显示录入频带（按原始冲突着色），规划位置以绿色描边框叠加
+  // 频段图始终显示录入频带（按原始冲突/归属着色），规划位置以段色描边框叠加
   const shownBands = analysis?.bands
   const shownFindings = analysis?.findings || []
   const plannedSpectrum = plan?.feasible ? plan.spectrum : null
@@ -125,6 +179,7 @@ export default function App() {
   const shownFindingsList = planView ? plan?.post_check?.findings : shownFindings
   const shownPower = planView ? plan?.post_check?.power_summary : analysis?.power_summary
   const shownStatus = planView ? plan?.post_check?.status : status
+  const shownAllocation = plan?.allocation || analysis?.allocation
 
   return (
     <>
@@ -148,7 +203,10 @@ export default function App() {
               <select className="field" style={{ flex: 1 }}
                       value={scenarioId ?? ''} onChange={(e) => loadScenario(e.target.value ? Number(e.target.value) : null)}>
                 <option value="">— 未保存的编辑 —</option>
-                {scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.carrier_count}）</option>)}
+                {scenarios.map((s) => <option key={s.id} value={s.id}>
+                  {s.name}（{s.carrier_count}）{s.allocation_version ? ` v${s.allocation_version}` : ''}
+                  {s.has_plans ? ' 🗂' : ''}
+                </option>)}
               </select>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
@@ -159,6 +217,20 @@ export default function App() {
               </button>
               {scenarioId && <button className="danger" onClick={deleteScenario} disabled={!!busy}>删除</button>}
             </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              {scenarioId && <button onClick={exportScenario} disabled={!!busy}>导出（含分配/规划历史）</button>}
+              <label className="import-btn">
+                <input type="file" accept="application/json" style={{ display: 'none' }}
+                       onChange={(e) => e.target.files?.[0] && importScenario(e.target.files[0])} />
+                <button type="button" disabled={!!busy}>导入（原子校验）</button>
+              </label>
+            </div>
+          </div>
+
+          <div className="panel">
+            <h2>频谱分配方案（多段可用 + 排除窗）</h2>
+            <AllocationPanel allocation={allocation} onChange={setAllocation}
+                             disabled={!!busy} migrated={legacyMigrated && !!scenarioId} />
           </div>
 
           <div className="panel">
@@ -196,6 +268,7 @@ export default function App() {
             {tab === 'spectrum' && (
               <>
                 <BandChart bands={shownBands} findings={shownFindings} plan={plan}
+                           allocation={shownAllocation}
                            selectedPair={selectedPair}
                            onPick={(name) => setSelectedPair(
                              selectedPair && selectedPair.includes(name) && selectedPair.length === 2
@@ -207,7 +280,7 @@ export default function App() {
                   {plan?.feasible && (
                     <span className="seg">
                       <button className={!planView ? 'on' : ''} onClick={() => setPlanView(false)}>
-                        录入频带（冲突着色）
+                        录入频带（冲突/归属着色）
                       </button>
                       <button className={planView ? 'on allowed' : ''} onClick={() => setPlanView(true)}>
                         规划后频带（复核 {plan.post_check?.counts.error}/{plan.post_check?.counts.warning}/{plan.post_check?.counts.pending}）
@@ -215,9 +288,10 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                <SpectrumChart spectrum={shownSpectrum} bands={spectrumBands} />
+                <SpectrumChart spectrum={shownSpectrum} bands={spectrumBands}
+                               allocation={shownAllocation} />
                 <div className="plot-note">
-                  提示：点击上方频段条选择载波；点击下方冲突条目可高亮对应载波对。
+                  底带 S1/S2… 为可用段边界，红色区域为排除窗；点击上方频段条选择载波，点击冲突条目高亮载波对。
                 </div>
               </>
             )}
@@ -227,13 +301,10 @@ export default function App() {
           <div className="panel">
             <h2>OR-Tools 频率规划</h2>
             <div className="row">
-              <label className="field-label">可用频段</label>
-              <input className="field" type="number" style={{ width: 84 }} value={band.low}
-                     onChange={(e) => setBand({ ...band, low: parseFloat(e.target.value) })} />
-              <span className="muted">–</span>
-              <input className="field" type="number" style={{ width: 84 }} value={band.high}
-                     onChange={(e) => setBand({ ...band, high: parseFloat(e.target.value) })} />
-              <span className="muted">MHz</span>
+              <span className="muted">分配方案 v{allocation.version}：
+                {allocation.segments.length} 个可用段 · {allocation.exclusions.length} 个排除窗
+              </span>
+              <span className="spacer" />
               <span className="seg">
                 <button className={planMode === 'guard_only' ? 'on' : ''}
                         onClick={() => setPlanMode('guard_only')}>仅保护间隔</button>
@@ -245,9 +316,16 @@ export default function App() {
               </button>
             </div>
             <div className="hint">
-              目标：在 1 kHz 网格上最小化各载波相对录入位置的总偏移；掩模感知模式按双向尾部泄漏达标反算间隔（含 0.5 dB 裕量）。
+              每条载波的占用带宽必须完整落在某个可用段被排除窗切出的净空小片内（不跨空洞）；
+              目标为 1 kHz 网格上最小化总偏移；掩模感知按双向尾部泄漏达标反算间隔（含 0.5 dB 裕量）。
             </div>
             {plan && <PlanResult plan={plan} />}
+          </div>
+
+          <div className="panel">
+            <h2>规划方案历史（版本 + post-check 过期标记）</h2>
+            <PlanHistory scenarioId={scenarioId} refreshKey={historyKey}
+                         onShowSnapshot={() => setTab('spectrum')} />
           </div>
 
           <div className="panel">
@@ -267,12 +345,24 @@ export default function App() {
   )
 }
 
+const SEG_COLORS = ['#3ecf8e', '#4da3ff', '#f5a623', '#b08cff',
+                    '#ff8f5d', '#5dd6d6', '#e35dd6', '#9be05d']
+
 function PlanResult({ plan }) {
   const [open, setOpen] = useState(true)
   if (!plan.feasible) {
     return (
-      <div className="err-msg" style={{ marginTop: 8 }}>
-        ✗ {plan.status}：{plan.message}
+      <div style={{ marginTop: 8 }}>
+        <div className="err-msg">
+          ✗ {plan.status}：{plan.message}
+        </div>
+        {(plan.infeasible_reasons || []).map((r, i) => (
+          <div key={i} className="hint" style={{ color: 'var(--error)' }}>
+            载波 {r.carrier}：带宽 {r.bandwidth_mhz} MHz &gt; 最宽净空 {r.max_piece_width_mhz} MHz
+            {(r.crossed_exclusions || []).length > 0 &&
+              `；跨越排除窗 ${r.crossed_exclusions.map((e) => `[${e.low_mhz}, ${e.high_mhz}]`).join(', ')}`}
+          </div>
+        ))}
       </div>
     )
   }
@@ -292,7 +382,8 @@ function PlanResult({ plan }) {
       {open && (
         <table className="plan-table" style={{ marginTop: 8 }}>
           <thead>
-            <tr><th>载波</th><th>原中心</th><th>新中心 MHz</th><th>频带范围</th><th>偏移 MHz</th></tr>
+            <tr><th>载波</th><th>原中心</th><th>新中心 MHz</th><th>频带范围</th>
+              <th>归属段</th><th>偏移 MHz</th><th>落段理由</th></tr>
           </thead>
           <tbody>
             {plan.assignments.map((a) => (
@@ -301,8 +392,15 @@ function PlanResult({ plan }) {
                 <td>{a.original_center_mhz.toFixed(3)}</td>
                 <td>{a.center_mhz.toFixed(3)}</td>
                 <td>{a.low_mhz.toFixed(2)}–{a.high_mhz.toFixed(2)}</td>
+                <td><span style={{ color: SEG_COLORS[(a.segment_index ?? 0) % SEG_COLORS.length] }}>
+                  S{(a.segment_index ?? 0) + 1}
+                </span></td>
                 <td className={a.shift_mhz > 0 ? 'shift-pos' : a.shift_mhz < 0 ? 'shift-neg' : ''}>
                   {a.shift_mhz > 0 ? '+' : ''}{a.shift_mhz.toFixed(3)}
+                </td>
+                <td className="muted reason-cell" title={a.assignment_reason}>
+                  {a.assignment_reason}
+                  {a.crosses_exclusion && <span className="err-msg"> ⚠ 跨排除窗</span>}
                 </td>
               </tr>
             ))}

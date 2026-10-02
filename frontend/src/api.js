@@ -33,4 +33,17 @@ export const api = {
     request('/analyze', { method: 'POST', body: JSON.stringify(payload) }),
   plan: (payload) =>
     request('/plan', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // 规划方案快照（不可变历史 + 版本 / post-check 过期标记）
+  listPlans: (id) => request(`/scenarios/${id}/plans?refresh=true`),
+  getPlan: (id, pid) => request(`/scenarios/${id}/plans/${pid}?refresh=true`),
+  savePlan: (id, payload) =>
+    request(`/scenarios/${id}/plans`, { method: 'POST', body: JSON.stringify(payload) }),
+  deletePlan: (id, pid) =>
+    request(`/scenarios/${id}/plans/${pid}`, { method: 'DELETE' }),
+
+  // 导出 / 导入（原子：后端校验失败不写入任何内容）
+  exportScenario: (id) => request(`/scenarios/${id}/export`),
+  importScenario: (doc) =>
+    request('/scenarios/import', { method: 'POST', body: JSON.stringify(doc) }),
 }

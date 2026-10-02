@@ -50,6 +50,20 @@ DEMO_CARRIERS = [
 ]
 
 
+# 教学演示的频谱分配方案（版本化）：两段不连续可用频段 + 一个段内排除窗。
+# 段一 80–120 MHz；保护空洞 120–125 MHz 后是段二 125–220 MHz，
+# 段二内 185–195 MHz 为不可跨越的排除窗（其他业务占用，夹在 C9/C10 与 C11/C12
+# 两组载波之间）。所有演示载波的占用带宽都完整落在某个有效净空小片内。
+DEMO_ALLOCATION = {
+    "name": "教学分配方案（两段 + 保护空洞）",
+    "version": 1,
+    "segments": [{"low_mhz": 80.0, "high_mhz": 120.0},
+                 {"low_mhz": 125.0, "high_mhz": 220.0}],
+    "exclusions": [{"low_mhz": 185.0, "high_mhz": 195.0,
+                    "reason": "保护空洞（其他业务占用）"}],
+}
+
+
 def seed(engine) -> None:
     Base.metadata.create_all(engine)
     with Session(engine) as s:
@@ -64,10 +78,13 @@ def seed(engine) -> None:
             sc = Scenario(
                 name="教学演示场景",
                 description="同带宽不同功率：保护带不足、掩模尾部越界（方向性）、"
-                            "频带重叠、极化复用待评估/允许，全部冲突可定位到载波对。",
+                            "频带重叠、极化复用待评估/允许，全部冲突可定位到载波对。"
+                            "频谱分配为两段不连续可用频段（120–125 MHz 保护空洞）"
+                            "加段内排除窗（140–143 MHz）。",
                 band_low_mhz=80.0, band_high_mhz=220.0,
                 guard_required_mhz=1.0, leakage_limit_dbm=-45.0,
                 reuse_policy=DEMO_POLICY,
+                allocation=DEMO_ALLOCATION,
             )
             sc.carriers = [CarrierRow(**kw) for kw in DEMO_CARRIERS]
             s.add(sc)

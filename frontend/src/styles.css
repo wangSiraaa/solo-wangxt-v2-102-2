@@ -147,3 +147,44 @@ label.field-label { color: var(--muted); font-size: 12px; }
 .err-msg { color: var(--error); font-size: 12px; margin-top: 6px; }
 .muted { color: var(--muted); }
 .plot-note { font-size: 11px; color: var(--muted); margin: 2px 0 8px; }
+
+/* ---- 频谱分配方案 ---- */
+.alloc-version {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 0 7px;
+}
+.alloc-migrated {
+  font-size: 10px; color: var(--warning); border: 1px solid var(--warning);
+  border-radius: 8px; padding: 0 7px;
+}
+table.alloc-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 2px 0 6px; }
+table.alloc-table td { padding: 2px 3px; }
+table.alloc-table input.num { width: 74px; text-align: right; }
+table.alloc-table .seg-idx {
+  font-weight: 700; color: var(--ok); width: 30px; font-size: 11px;
+}
+table.alloc-table .exc-idx { color: var(--error); }
+table.alloc-table .del { width: 26px; text-align: center; }
+
+/* ---- 规划快照历史 ---- */
+.stale-badge {
+  font-size: 10px; font-weight: 700; color: var(--error);
+  border: 1px solid var(--error); border-radius: 8px; padding: 0 7px;
+}
+.fresh-badge {
+  font-size: 10px; font-weight: 700; color: var(--ok);
+  border: 1px solid var(--ok); border-radius: 8px; padding: 0 7px;
+}
+tr.plan-stale-row { outline: 1px solid rgba(255,93,93,.25); }
+tr.plan-fresh-row td { }
+.snapshot-detail {
+  margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--panel-2);
+}
+.stale-reasons { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: var(--error); }
+.stale-reasons li { margin-bottom: 2px; }
+.plan-table td.reason-cell {
+  text-align: left; max-width: 280px; font-size: 11px;
+  white-space: normal; color: var(--muted);
+}
+.import-btn button { cursor: pointer; }
